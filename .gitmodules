@@ -1,0 +1,6 @@
+[submodule "inventory/sn-1"]
+	path = inventory/sn-1
+	url = git@github.com:NeorCloud/sn-1-kubespray-inventory.git
+[submodule "sn-1"]
+	path = sn-1
+	url = git@github.com:NeorCloud/sn-1-kubespray-inventory.git
