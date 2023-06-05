@@ -107,6 +107,7 @@
               argocd.argoproj.io/secret-type: repository
           stringData:
             url: "{{ bootstrapping.repos.cluster_components.url }}"
+            type: git
             password: "{{ bootstrapping.repos.cluster_components.token }}"
             username: "{{ bootstrapping.repos.ouath_username }}"
     - name: Create bootstrapping application
