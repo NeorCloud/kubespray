@@ -148,7 +148,7 @@
         kind: Ingress
         namespace: "{{ bootstrapping.argo_namespace }}"
         label_selectors:
-          - argocd.argoproj.io/instance=argocd-server
+          - app.kubernetes.io/instance=argocd
       register: ingress_info
     - name: Create ingress if not present
       kubernetes.core.k8s:
