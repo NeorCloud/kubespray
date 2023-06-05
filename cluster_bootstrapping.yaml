@@ -91,7 +91,7 @@
               argocd.argoproj.io/secret-type: repo-creds
           stringData:
             url: "{{ bootstrapping.repos.neor_org.url }}"
-            type: helm
+            type: git
             password: "{{ bootstrapping.repos.neor_org.token }}"
             username: "{{ bootstrapping.repos.ouath_username }}"
     - name: Add cluster components charts repo credentials
@@ -104,10 +104,9 @@
             name: cluster-charts-repo-creds
             namespace: "{{ bootstrapping.argo_namespace }}"
             labels:
-              argocd.argoproj.io/secret-type: repo-creds
+              argocd.argoproj.io/secret-type: repository
           stringData:
             url: "{{ bootstrapping.repos.cluster_components.url }}"
-            type: helm
             password: "{{ bootstrapping.repos.cluster_components.token }}"
             username: "{{ bootstrapping.repos.ouath_username }}"
     - name: Create bootstrapping application
