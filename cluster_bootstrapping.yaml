@@ -164,19 +164,19 @@
           spec:
             tls:
               - hosts:
-                  - "{{ ingress_host }}"
+                  - "{{ bootstrapping.argo_ingress.host }}"
                 secretName: argo-tls
             rules:
-              - host: "{{ ingress_host }}"
+              - host: "{{ bootstrapping.argo_ingress.host }}"
                 http:
                   paths:
-                    - path: /
-                      pathType: Prefix
+                    - path: "{{ bootstrapping.argo_ingress.path }}"
+                      pathType: "{{ bootstrapping.argo_ingress.pathType }}"
                       backend:
                         service:
-                          name: argocd-server
+                          name: "{{ bootstrapping.argo_ingress.serviceName }}"
                           port:
-                            number: 80
+                            number: "{{ bootstrapping.argo_ingress.servicePort }}"
       when: ingress_info.resources | length == 0
 
 - name: Install ArgoCD CLI
