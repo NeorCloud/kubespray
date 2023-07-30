@@ -1,0 +1,190 @@
+- name: Prepare topolvm environment
+  hosts: kube_node
+  become: true
+  vars_prompt:
+    - name: "topolvm_disks"
+      prompt: "Enter disks for topolvm"
+      private: false
+      default: "/dev/sdb"
+  tasks:
+    - name: Create volume group
+      community.general.lvg:
+        vg: topolvm
+        pvs: "{{ topolvm_disks }}"
+        state: present
+
+- name: Install pre-requisites for k8s ansible module
+  hosts: "{{ groups['kube_control_plane'] | first }}"
+  become: true
+  tasks:
+    - name: Install pip
+      ansible.builtin.package:
+        name: python3-pip
+        state: present
+    - name: Install kubernetes task pre-requisites
+      ansible.builtin.pip:
+        name:
+          - kubernetes
+          - pyyaml
+          - openshift
+        state: present
+
+- name: Create topolvm namespace
+  hosts: "{{ groups['kube_control_plane'] | first }}"
+  become: true
+  tasks:
+    - name: Create topolvm namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: topolvm-system
+            labels:
+              "topolvm.io/webhook": ignore
+
+- name: Create letsencrypt clusterIssuer
+  hosts: "{{ groups['kube_control_plane'] | first }}"
+  become: true
+  tasks:
+    - name: Create letsencrypt clusterIssuer
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: "{{ bootstrapping.issuer.name }}"
+          spec:
+            acme:
+              email: "{{ bootstrapping.issuer.email }}"
+              server: https://acme-v02.api.letsencrypt.org/directory
+              privateKeySecretRef:
+                name: "{{ bootstrapping.issuer.name }}"
+              solvers:
+                - http01:
+                    ingress: {}
+
+- name: Bootstrap cluster using ArgoCD
+  hosts: "{{ groups['kube_control_plane'] | first }}"
+  become: true
+  tasks:
+    - name: Create argo namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ bootstrapping.argo_namespace }}"
+    - name: Add Neor credential template
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: neor-org-github-creds
+            namespace: "{{ bootstrapping.argo_namespace }}"
+            labels:
+              argocd.argoproj.io/secret-type: repo-creds
+          stringData:
+            url: "{{ bootstrapping.repos.neor_org.url }}"
+            type: git
+            password: "{{ bootstrapping.repos.neor_org.token }}"
+            username: "{{ bootstrapping.repos.ouath_username }}"
+    - name: Add cluster components charts repo credentials
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: cluster-charts-repo-creds
+            namespace: "{{ bootstrapping.argo_namespace }}"
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            url: "{{ bootstrapping.repos.cluster_components.url }}"
+            type: git
+            password: "{{ bootstrapping.repos.cluster_components.token }}"
+            username: "{{ bootstrapping.repos.ouath_username }}"
+    - name: Create bootstrapping application
+      kubernetes.core.k8s:
+        state: present
+        namespace: "{{ bootstrapping.argo_namespace }}"
+        definition:
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: "{{ bootstrapping.app.name }}"
+          spec:
+            destination:
+              namespace: "{{ bootstrapping.argo_namespace }}"
+              server: "https://kubernetes.default.svc"
+            project: default
+            source:
+              path: "{{  bootstrapping.app.repo.path }}"
+              repoURL: "{{ bootstrapping.app.repo.url }}"
+              targetRevision: "{{  bootstrapping.app.repo.revision }}"
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+                - Validate=false
+                - Prune=true
+                - SelfHeal=true
+
+- name: Create Ingress for ArgoCD pannel if not present
+  hosts: "{{ groups['kube_control_plane'] | first }}"
+  become: true
+  tasks:
+    - name: Gather fact that ArgoCD has a Ingress
+      kubernetes.core.k8s_info:
+        api_version: networking.k8s.io/v1
+        kind: Ingress
+        namespace: "{{ bootstrapping.argo_namespace }}"
+        label_selectors:
+          - app.kubernetes.io/instance=argocd
+      register: ingress_info
+    - name: Create ingress if not present
+      kubernetes.core.k8s:
+        state: present
+        namespace: "{{ bootstrapping.argo_namespace }}"
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: argo
+            annotations:
+              cert-manager.io/cluster-issuer: "{{ bootstrapping.issuer.name }}"
+          spec:
+            tls:
+              - hosts:
+                  - "{{ bootstrapping.argo_ingress.host }}"
+                secretName: argo-tls
+            rules:
+              - host: "{{ bootstrapping.argo_ingress.host }}"
+                http:
+                  paths:
+                    - path: "{{ bootstrapping.argo_ingress.path }}"
+                      pathType: "{{ bootstrapping.argo_ingress.pathType }}"
+                      backend:
+                        service:
+                          name: "{{ bootstrapping.argo_ingress.serviceName }}"
+                          port:
+                            number: "{{ bootstrapping.argo_ingress.servicePort }}"
+      when: ingress_info.resources | length == 0
+
+- name: Install ArgoCD CLI
+  hosts: kube_control_plane
+  become: true
+  tasks:
+    - name: Install ArgoCD CLI
+      ansible.builtin.get_url:
+        url: https://github.com/argoproj/argo-cd/releases/download/v2.7.3/argocd-linux-amd64
+        dest: /usr/local/bin/argocd
+        mode: '0755'
